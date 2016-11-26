@@ -27,73 +27,56 @@ function PingPlatform(log, config, api) {
 
 // Method to restore accessories from cache
 PingPlatform.prototype.configureAccessory = function (accessory) {
-  var self = this;
-  var accessoryName = accessory.context.name;
+  var name = accessory.context.name;
 
   this.setService(accessory);
-  this.accessories[accessoryName] = accessory;
+  this.accessories[name] = accessory;
 }
 
 // Method to setup accesories from config.json
 PingPlatform.prototype.didFinishLaunching = function () {
+  // Add Anyone and No One accessories if enabled
+  if (this.anyone) this.people.push({"name": "Anyone"});
+  if (this.noOne) this.people.push({"name": "No One"});
 
   // Add or update accessories defined in config.json
   for (var i in this.people) {
-    var data = this.people[i];
-    this.addAccessory(data);
-
-    // Configure state polling
-    this.statePolling(data.name);
-  }
-
-  // Configre anyone sensor
-  if (this.anyone) {
-    var supplementalSensor = {};
-    supplementalSensor.name = "Anyone";
-    this.addAccessory(supplementalSensor);
-  }
-
-  // Configure no one sensor
-  if (this.noOne) {
-    var supplementalSensor = {};
-    supplementalSensor.name = "No One";
-    this.addAccessory(supplementalSensor);
+    var person = this.people[i];
+    this.addAccessory(person);
   }
 
   // Remove extra accessories in cache
   for (var name in this.accessories) {
     var accessory = this.accessories[name];
-    if (!accessory.reachable) {
-      this.removeAccessory(accessory);
-    }
+    if (!accessory.reachable) this.removeAccessory(accessory);
   }
 }
 
 // Method to add and update HomeKit accessories
-PingPlatform.prototype.addAccessory = function (data) {
+PingPlatform.prototype.addAccessory = function (person) {
   // Confirm variable type
-  data.interval = parseInt(data.interval) || 1;
-  data.threshold = parseInt(data.threshold) || 15;
-  if (data.manufacturer) data.manufacturer = data.manufacturer.toString();
-  if (data.model) data.model = data.model.toString();
-  if (data.serial) data.serial = data.serial.toString();
+  person.interval = parseInt(person.interval) || 1;
+  person.threshold = parseInt(person.threshold) || 15;
+  if (person.manufacturer) person.manufacturer = person.manufacturer.toString();
+  if (person.model) person.model = person.model.toString();
+  if (person.serial) person.serial = person.serial.toString();
 
-  if (!this.accessories[data.name]) {
-    var uuid = UUIDGen.generate(data.name);
+  if (!this.accessories[person.name]) {
+    var uuid = UUIDGen.generate(person.name);
 
     // Setup accessory as SENSOR (10) category.
-    var newAccessory = new Accessory(data.name, uuid, 10);
+    var newAccessory = new Accessory(person.name, uuid, 10);
 
     // New accessory is always reachable
     newAccessory.reachable = true;
 
     // Store and initialize variables into context
-    newAccessory.context.name = data.name;
-    newAccessory.context.lastSeen = Date.now() - (data.threshold * 60000);
+    newAccessory.context.name = person.name;
+    newAccessory.context.lastSeen = Date.now() - (person.threshold * 60000);
     newAccessory.context.state = false;
 
     // Setup HomeKit occupancy sensor service
-    newAccessory.addService(Service.OccupancySensor, data.name);
+    newAccessory.addService(Service.OccupancySensor, person.name);
 
     // Setup listeners for different switch events
     this.setService(newAccessory);
@@ -102,25 +85,28 @@ PingPlatform.prototype.addAccessory = function (data) {
     this.api.registerPlatformAccessories("homebridge-ping", "Ping", [newAccessory]);
   } else {
     // Retrieve accessory from cache
-    var newAccessory = this.accessories[data.name];
+    var newAccessory = this.accessories[person.name];
 
     // Accessory is reachable if it's found in config.json
     newAccessory.updateReachability(true);
   }
 
   // Update variables in context
-  newAccessory.context.target = data.target;
-  newAccessory.context.interval = data.interval;
-  newAccessory.context.threshold = data.threshold;
-  newAccessory.context.manufacturer = data.manufacturer;
-  newAccessory.context.model = data.model;
-  newAccessory.context.serial = data.serial;
+  newAccessory.context.target = person.target;
+  newAccessory.context.interval = person.interval;
+  newAccessory.context.threshold = person.threshold;
+  newAccessory.context.manufacturer = person.manufacturer;
+  newAccessory.context.model = person.model;
+  newAccessory.context.serial = person.serial;
 
   // Retrieve initial state
   this.getInitState(newAccessory);
 
   // Store accessory in cache
-  this.accessories[data.name] = newAccessory;
+  this.accessories[person.name] = newAccessory;
+
+  // Configure state polling
+  if (person.name !== "Anyone" && person.name !== "No One") this.statePolling(person.name);
 }
 
 // Method to remove accessories from HomeKit
@@ -168,42 +154,33 @@ PingPlatform.prototype.statePolling = function (name) {
     // Compute sensor state
     var activeThreshold = Date.now() - (thisPerson.threshold * 60000);
     var state = (thisPerson.lastSeen - activeThreshold) > 0;
+    var anyoneState = self.getAnyoneState();
 
     // Detect for state changes
-    if (state !== thisPerson.state) {
-      thisPerson.state = state;
+    if (state !== thisPerson.state) self.log(thisPerson.name + (state ? " arrived." : " left."));
 
-      // Update state for HomeKit accessory
-      self.log(thisPerson.name + (state ? " arrived." : " left."));
-      accessory.getService(Service.OccupancySensor)
-        .getCharacteristic(Characteristic.OccupancyDetected)
-        .setValue(state);
-
-      // Update state for Anyone and No One sensors
-      var anyoneState = self.getSupplementalSensorState();
-      if (self.anyone) self.updateSupplementalSensorState("Anyone", anyoneState);
-      if (self.noOne) self.updateSupplementalSensorState("No One", !anyoneState);
-    }
+    // Update state for HomeKit accessories
+    self.updateSensorState(thisPerson.name, state);
+    if (self.anyone) self.updateSensorState("Anyone", anyoneState);
+    if (self.noOne) self.updateSensorState("No One", !anyoneState);
   });
 
   // Setup for next polling
   setTimeout(this.statePolling.bind(this, name), thisPerson.interval * 1000);
 }
 
-// Method to compute supplemental sensor state
-PingPlatform.prototype.getSupplementalSensorState = function () {
+// Method to compute Anyone sensor state
+PingPlatform.prototype.getAnyoneState = function () {
   for (var i in this.people) {
     var name = this.people[i].name;
     var thisPerson = this.accessories[name].context;
-    if (thisPerson.state) {
-      return true;
-    }
+    if (thisPerson.state) return true;
   }
   return false;
 }
 
-// Method to update supplemental sensor state
-PingPlatform.prototype.updateSupplementalSensorState = function (name, state) {
+// Method to update HomeKit accessory state
+PingPlatform.prototype.updateSensorState = function (name, state) {
   var accessory = this.accessories[name];
   var cache = accessory.context;
 
@@ -233,9 +210,7 @@ PingPlatform.prototype.identify = function (thisPerson, paired, callback) {
 
 // Method to handle plugin configuration in HomeKit app
 PingPlatform.prototype.configurationRequestHandler = function (context, request, callback) {
-  if (request && request.type === "Terminate") {
-    return;
-  }
+  if (request && request.type === "Terminate") return;
 
   // Instruction
   if (!context.step) {
@@ -352,18 +327,18 @@ PingPlatform.prototype.configurationRequestHandler = function (context, request,
         break;
       case 3:
         if (context.operation === 0) {
-          var data = request.response.inputs;
+          var person = request.response.inputs;
         } else if (context.operation === 1) {
           var selection = context.list[request.response.selections[0]];
-          var data = this.accessories[selection].context;
+          var person = this.accessories[selection].context;
         }
 
-        if (data.name) {
+        if (person.name) {
           // Add or Modify info of selected accessory
           var respDict = {
             "type": "Interface",
             "interface": "input",
-            "title": data.name,
+            "title": person.name,
             "items": [{
               "id": "target",
               "title": "Hostname/IP",
@@ -391,7 +366,7 @@ PingPlatform.prototype.configurationRequestHandler = function (context, request,
             }]
           };
 
-          context.name = data.name;
+          context.name = person.name;
           context.step = 5;
         } else {
           // Error if required info is missing
@@ -412,21 +387,21 @@ PingPlatform.prototype.configurationRequestHandler = function (context, request,
         break;
       case 4:
         var selection = request.response.selections[0] === 1;
-        var supplementalSensor = {};
+        var newPerson = {};
 
         if (context.sensor) {
           this.anyone = selection;
-          supplementalSensor.name = "Anyone";
+          newPerson.name = "Anyone";
         } else {
           this.noOne = selection;
-          supplementalSensor.name = "No One";
+          newPerson.name = "No One";
         }
 
         // Add or remove Anyone and No One HomeKit accessory
         if (selection) {          
-          this.addAccessory(supplementalSensor);
+          this.addAccessory(newPerson);
         } else {
-          var accessory = this.accessories[supplementalSensor.name];
+          var accessory = this.accessories[newPerson.name];
           this.removeAccessory(accessory);
         }
 
@@ -462,7 +437,6 @@ PingPlatform.prototype.configurationRequestHandler = function (context, request,
 
         // Register or update HomeKit accessory
         this.addAccessory(newPerson);
-        this.statePolling(newPerson.name);
         var respDict = {
           "type": "Interface",
           "interface": "instruction",
@@ -510,7 +484,7 @@ PingPlatform.prototype.configurationRequestHandler = function (context, request,
         // Create config for each person
         var newPeople = names.map(function (k) {
           var accessory = self.accessories[k];
-          var data = {
+          var person = {
             'name': accessory.context.name,
             'target': accessory.context.target,
             'interval': accessory.context.interval,
@@ -519,7 +493,7 @@ PingPlatform.prototype.configurationRequestHandler = function (context, request,
             'model': accessory.context.model,
             'serial': accessory.context.serial
           };
-          return data;
+          return person;
         });
 
         newConfig.people = newPeople;
