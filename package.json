@@ -1,0 +1,25 @@
+{
+  "name": "homebridge-ping",
+  "version": "0.1.0",
+  "description": "Ping plugin for HomeBridge (API 2.0): https://github.com/nfarina/homebridge",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/luisiam/homebridge-ping.git"
+  },
+  "keywords": [
+    "homebridge-plugin"
+  ],
+  "author": "Luis Iam",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/luisiam/homebridge-ping/issues"
+  },
+  "homepage": "https://github.com/luisiam/homebridge-ping#readme",
+  "engines": {
+    "node": ">=0.12.0",
+    "homebridge": ">=0.3.0"
+  },
+  "dependencies": {
+    "ping": "^0.1.10"
+  }
+}
