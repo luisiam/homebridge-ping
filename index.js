@@ -14,10 +14,11 @@ function PingPlatform(log, config, api) {
   this.log = log;
   this.config = config || {"platform": "Ping"};
   this.people = this.config.people || [];
-  this.anyone = this.config.anyoneSensor;
-  this.noOne = this.config.noOneSensor;
+  this.anyone = this.config.anyoneSensor === true;
+  this.noOne = this.config.anyoneSensor === true;
 
   this.accessories = {};
+  this.tout = {};
 
   if (api) {
     this.api = api;
@@ -27,10 +28,8 @@ function PingPlatform(log, config, api) {
 
 // Method to restore accessories from cache
 PingPlatform.prototype.configureAccessory = function (accessory) {
-  var name = accessory.context.name;
-
   this.setService(accessory);
-  this.accessories[name] = accessory;
+  this.accessories[accessory.context.name] = accessory;
 }
 
 // Method to setup accesories from config.json
@@ -40,10 +39,7 @@ PingPlatform.prototype.didFinishLaunching = function () {
   if (this.noOne) this.people.push({"name": "No One"});
 
   // Add or update accessories defined in config.json
-  for (var i in this.people) {
-    var person = this.people[i];
-    this.addAccessory(person);
-  }
+  for (var i in this.people) this.addAccessory(this.people[i]);
 
   // Remove extra accessories in cache
   for (var name in this.accessories) {
@@ -55,55 +51,55 @@ PingPlatform.prototype.didFinishLaunching = function () {
 // Method to add and update HomeKit accessories
 PingPlatform.prototype.addAccessory = function (person) {
   // Confirm variable type
-  person.interval = parseInt(person.interval) || 1;
-  person.threshold = parseInt(person.threshold) || 15;
+  person.interval = parseInt(person.interval, 10) || 1;
+  person.threshold = parseInt(person.threshold, 10) || 15;
   if (person.manufacturer) person.manufacturer = person.manufacturer.toString();
   if (person.model) person.model = person.model.toString();
   if (person.serial) person.serial = person.serial.toString();
 
-  if (!this.accessories[person.name]) {
-    var uuid = UUIDGen.generate(person.name);
-
+  // Retrieve accessory from cache
+  var accessory = this.accessories[person.name];
+  
+  if (!accessory) {
     // Setup accessory as SENSOR (10) category.
-    var newAccessory = new Accessory(person.name, uuid, 10);
-
-    // New accessory is always reachable
-    newAccessory.reachable = true;
-
-    // Store and initialize variables into context
-    newAccessory.context.name = person.name;
-    newAccessory.context.lastSeen = Date.now() - (person.threshold * 60000);
-    newAccessory.context.state = false;
+    var uuid = UUIDGen.generate(person.name);
+    var accessory = new Accessory(person.name, uuid, 10);
 
     // Setup HomeKit occupancy sensor service
-    newAccessory.addService(Service.OccupancySensor, person.name);
+    accessory.addService(Service.OccupancySensor, person.name);
+
+    // New accessory is always reachable
+    accessory.reachable = true;
 
     // Setup listeners for different switch events
-    this.setService(newAccessory);
+    this.setService(accessory);
 
-    // Register accessory in HomeKit
-    this.api.registerPlatformAccessories("homebridge-ping", "Ping", [newAccessory]);
-  } else {
-    // Retrieve accessory from cache
-    var newAccessory = this.accessories[person.name];
-
-    // Accessory is reachable if it's found in config.json
-    newAccessory.updateReachability(true);
+    // Register new accessory in HomeKit
+    this.api.registerPlatformAccessories("homebridge-ping", "Ping", [accessory]);
   }
 
-  // Update variables in context
-  newAccessory.context.target = person.target;
-  newAccessory.context.interval = person.interval;
-  newAccessory.context.threshold = person.threshold;
-  newAccessory.context.manufacturer = person.manufacturer;
-  newAccessory.context.model = person.model;
-  newAccessory.context.serial = person.serial;
+  // Accessory is reachable if it's found in config.json
+  accessory.updateReachability(true);
+
+  // Store and initialize variables into context
+  var cache = accessory.context;
+  cache.name = person.name;
+  cache.target = person.target;
+  cache.interval = person.interval;
+  cache.threshold = person.threshold;
+  cache.manufacturer = person.manufacturer;
+  cache.model = person.model;
+  cache.serial = person.serial;
+  if (cache.state === undefined) {
+    cache.lastSeen = Date.now() - (person.threshold * 60000);
+    cache.state = false;
+  }
 
   // Retrieve initial state
-  this.getInitState(newAccessory);
+  this.getInitState(accessory);
 
   // Store accessory in cache
-  this.accessories[person.name] = newAccessory;
+  this.accessories[person.name] = accessory;
 
   // Configure state polling
   if (person.name !== "Anyone" && person.name !== "No One") this.statePolling(person.name);
@@ -147,6 +143,9 @@ PingPlatform.prototype.statePolling = function (name) {
   var accessory = this.accessories[name];
   var thisPerson = accessory.context;
 
+  // Clear polling
+  clearTimeout(this.tout[name]);
+
   ping.sys.probe(thisPerson.target, function(connected){
     // Update the last seen time if persion is present
     if (connected) thisPerson.lastSeen = Date.now();
@@ -166,7 +165,7 @@ PingPlatform.prototype.statePolling = function (name) {
   });
 
   // Setup for next polling
-  setTimeout(this.statePolling.bind(this, name), thisPerson.interval * 1000);
+  this.tout[name] = setTimeout(this.statePolling.bind(this, name), thisPerson.interval * 1000);
 }
 
 // Method to compute Anyone sensor state
