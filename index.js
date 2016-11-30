@@ -15,7 +15,7 @@ function PingPlatform(log, config, api) {
   this.config = config || {"platform": "Ping"};
   this.people = this.config.people || [];
   this.anyone = this.config.anyoneSensor === true;
-  this.noOne = this.config.anyoneSensor === true;
+  this.noOne = this.config.noOneSensor === true;
 
   this.accessories = {};
   this.tout = {};
@@ -34,12 +34,12 @@ PingPlatform.prototype.configureAccessory = function (accessory) {
 
 // Method to setup accesories from config.json
 PingPlatform.prototype.didFinishLaunching = function () {
-  // Add Anyone and No One accessories if enabled
-  if (this.anyone) this.people.push({"name": "Anyone"});
-  if (this.noOne) this.people.push({"name": "No One"});
-
   // Add or update accessories defined in config.json
-  for (var i in this.people) this.addAccessory(this.people[i]);
+  for (var i in this.people) this.addAccessory(this.people[i], true);
+
+  // Add Anyone and No One accessories if enabled
+  if (this.anyone) this.addAccessory({"name": "Anyone"}, false);
+  if (this.noOne) this.addAccessory({"name": "No One"}, false);
 
   // Remove extra accessories in cache
   for (var name in this.accessories) {
@@ -49,13 +49,8 @@ PingPlatform.prototype.didFinishLaunching = function () {
 }
 
 // Method to add and update HomeKit accessories
-PingPlatform.prototype.addAccessory = function (person) {
-  // Confirm variable type
-  person.interval = parseInt(person.interval, 10) || 1;
-  person.threshold = parseInt(person.threshold, 10) || 15;
-  if (person.manufacturer) person.manufacturer = person.manufacturer.toString();
-  if (person.model) person.model = person.model.toString();
-  if (person.serial) person.serial = person.serial.toString();
+PingPlatform.prototype.addAccessory = function (person, polling) {
+  this.log("Initializing platform accessory '" + person.name + "'...");
 
   // Retrieve accessory from cache
   var accessory = this.accessories[person.name];
@@ -78,8 +73,12 @@ PingPlatform.prototype.addAccessory = function (person) {
     this.api.registerPlatformAccessories("homebridge-ping", "Ping", [accessory]);
   }
 
-  // Accessory is reachable if it's found in config.json
-  accessory.updateReachability(true);
+  // Confirm variable type
+  person.interval = parseInt(person.interval, 10) || 1;
+  person.threshold = parseInt(person.threshold, 10) || 15;
+  if (person.manufacturer) person.manufacturer = person.manufacturer.toString();
+  if (person.model) person.model = person.model.toString();
+  if (person.serial) person.serial = person.serial.toString();
 
   // Store and initialize variables into context
   var cache = accessory.context;
@@ -102,7 +101,7 @@ PingPlatform.prototype.addAccessory = function (person) {
   this.accessories[person.name] = accessory;
 
   // Configure state polling
-  if (person.name !== "Anyone" && person.name !== "No One") this.statePolling(person.name);
+  if (polling) this.statePolling(person.name);
 }
 
 // Method to remove accessories from HomeKit
@@ -135,6 +134,9 @@ PingPlatform.prototype.getInitState = function (accessory) {
     .setCharacteristic(Characteristic.Manufacturer, manufacturer)
     .setCharacteristic(Characteristic.Model, model)
     .setCharacteristic(Characteristic.SerialNumber, serial);
+
+  // Configured accessory is reachable
+  accessory.updateReachability(true);
 }
 
 // Method for state polling
@@ -170,8 +172,15 @@ PingPlatform.prototype.statePolling = function (name) {
 
 // Method to compute Anyone sensor state
 PingPlatform.prototype.getAnyoneState = function () {
-  for (var i in this.people) {
-    var name = this.people[i].name;
+  // Create list of names
+  var names = Object.keys(this.accessories);
+
+  // Remove Anyone and No One from the list
+  if (this.anyone) names.splice(names.indexOf("Anyone"), 1);
+  if (this.noOne) names.splice(names.indexOf("No One"), 1);
+
+  for (var i in names) {
+    var name = names[i];
     var thisPerson = this.accessories[name].context;
     if (thisPerson.state) return true;
   }
@@ -398,7 +407,7 @@ PingPlatform.prototype.configurationRequestHandler = function (context, request,
 
         // Add or remove Anyone and No One HomeKit accessory
         if (selection) {          
-          this.addAccessory(newPerson);
+          this.addAccessory(newPerson, false);
         } else {
           var accessory = this.accessories[newPerson.name];
           this.removeAccessory(accessory);
@@ -435,7 +444,7 @@ PingPlatform.prototype.configurationRequestHandler = function (context, request,
         newPerson.serial = userInputs.serial;
 
         // Register or update HomeKit accessory
-        this.addAccessory(newPerson);
+        this.addAccessory(newPerson, true);
         var respDict = {
           "type": "Interface",
           "interface": "instruction",
