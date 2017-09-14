@@ -91,7 +91,7 @@ PingPlatform.prototype.addAccessory = function (person, polling) {
   cache.serial = person.serial;
   if (cache.state === undefined) {
     cache.lastSeen = Date.now() - (person.threshold * 60000);
-    cache.state = false;
+    cache.state = Characteristic.OccupancyDetected.OCCUPANCY_NOT_DETECTED;
   }
 
   // Retrieve initial state
@@ -154,8 +154,14 @@ PingPlatform.prototype.statePolling = function (name) {
 
     // Compute sensor state
     var activeThreshold = Date.now() - (thisPerson.threshold * 60000);
-    var state = (thisPerson.lastSeen - activeThreshold) > 0;
+    var state;
     var anyoneState = self.getAnyoneState();
+
+    if ((thisPerson.lastSeen - activeThreshold) > 0) {
+        state = Characteristic.OccupancyDetected.OCCUPANCY_DETECTED;
+    } else {
+        state = Characteristic.OccupancyDetected.OCCUPANCY_NOT_DETECTED;
+    }
 
     // Detect for state changes
     if (state !== thisPerson.state) self.log(thisPerson.name + (state ? " arrived." : " left."));
@@ -182,9 +188,9 @@ PingPlatform.prototype.getAnyoneState = function () {
   for (var i in names) {
     var name = names[i];
     var thisPerson = this.accessories[name].context;
-    if (thisPerson.state) return true;
+    if (thisPerson.state) return Characteristic.OccupancyDetected.OCCUPANCY_DETECTED;
   }
-  return false;
+  return Characteristic.OccupancyDetected.OCCUPANCY_NOT_DETECTED;
 }
 
 // Method to update HomeKit accessory state
