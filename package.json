@@ -1,6 +1,6 @@
 {
   "name": "homebridge-ping",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Ping plugin for HomeBridge (API 2.0): https://github.com/nfarina/homebridge",
   "repository": {
     "type": "git",
@@ -20,6 +20,6 @@
     "homebridge": ">=0.3.0"
   },
   "dependencies": {
-    "ping": "^0.1.10"
+    "ping": ">=0.1.10"
   }
 }
